@@ -25,9 +25,11 @@ Word 보고서(본문 10 pt, Arial과 맑은 고딕)에 넣을 실험 그래프�
      build 스크립트에서는 add_picture(path, width=Inches(lf.WIDTHS["wide"]))처럼 같은 폭을 쓴다.
   3. 역할마다 그리는 방법을 고정한다.
        points  이산 측정값. 속이 빈 마커, 계열마다 모양이 다르다.
-       trace   촘촘하게 샘플링한 측정 곡선. 실선에서 시작해 계열마다 선 모양이 다르다.
+       trace   곡선 (촘촘한 측정 곡선, 이론 곡선 비교). 실선에서 시작해 계열마다 선 모양이 다르다.
        model   이론값, 모델, 회귀선. 가는 점선. 기본은 검정, series를 주면 그 계열 색.
+       bars    묶음 막대. 계열마다 색과 빗금이 다르다.
      색과 모양이 함께 바뀌므로 흑백 인쇄에서도 계열이 구분된다.
+     그 밖에 mark, note, region, vref, href (주석과 기준선), mosaic, canvas, photo (그림 틀)가 있다.
   4. 계열 색은 SERIES 순서대로만 쓴다 (최대 5개). 더 많으면 패널을 나눈다.
   5. 축 범위는 물리량 기준으로 정하고 (가능하면 0 포함), 축 이름에는 항상 단위를 적는다.
      y축을 두 개 쓰지 않는다. 단위가 다른 두 양은 패널을 나눈다.
@@ -61,6 +63,8 @@ MARKERS = ("o", "s", "^", "D", "v")
 _MS = {"o": 4.6, "s": 4.2, "^": 5.0, "D": 3.9, "v": 5.0}            # 모양별로 눈에 보이는 크기를 맞춘다
 DASHES = ("-", (0, (5, 1.8)), (0, (5, 1.6, 1.2, 1.6)), (0, (1.2, 1.4)), (0, (8, 2, 1.2, 2, 1.2, 2)))
 MODEL_DASH = (0, (3.5, 2))
+REF_DASH = (0, (1.2, 1.6))                                          # 기준선
+HATCHES = ("", "////", "....", "xxxx", "\\\\\\\\")                  # 막대 계열별 빗금
 LEAD = dict(arrowstyle="-", lw=0.6, color=INK, shrinkA=1, shrinkB=3)   # 주석 지시선
 SMALL = 8.5            # 범례, 주석 글자 크기
 
@@ -117,6 +121,7 @@ def use(font_size: float = 9.0, latin: str = "Arial", korean: str = "Malgun Goth
         "legend.handlelength": 2.4,
         "legend.labelspacing": 0.3,
         "legend.borderaxespad": 0.3,
+        "hatch.linewidth": 0.6,
         # 저장
         "savefig.dpi": 600,
         "pdf.fonttype": 42,
@@ -176,11 +181,36 @@ def figure(width: str | float = "full", height: float | None = None, nrows: int 
     width는 프리셋 이름("full", "wide", "single", "half")이나 inch 값.
     height를 생략하면 패널 비율로 정한다.
     """
-    w = WIDTHS[width] if isinstance(width, str) else float(width)
+    w = _width(width)
     if height is None:
         height = min(w / ncols * 0.8, 3.0) * nrows
     kw.setdefault("layout", "constrained")
     return plt.subplots(nrows, ncols, figsize=(w, height), **kw)
+
+
+def _width(width) -> float:
+    return WIDTHS[width] if isinstance(width, str) else float(width)
+
+
+def mosaic(layout, width: str | float = "wide", height: float = 3.0, **kw):
+    """패널 크기가 서로 다른 그림. layout은 plt.subplot_mosaic과 같다 (예: [["a", "b"], ["c", "c"]]).
+
+    (fig, {이름: ax})를 돌려준다.
+    """
+    kw.setdefault("layout", "constrained")
+    return plt.subplot_mosaic(layout, figsize=(_width(width), height), **kw)
+
+
+def canvas(width: str | float, xlim, ylim):
+    """축이 없는 개념도용 그림. 좌표 범위의 가로세로비로 높이를 정하므로 저장 폭이 정확하다."""
+    w = _width(width)
+    fig = plt.figure(figsize=(w, w * (ylim[1] - ylim[0]) / (xlim[1] - xlim[0])))
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
+    ax.set_aspect("equal")
+    ax.axis("off")
+    return fig, ax
 
 
 def save(fig, path, dpi: int = 600, tight: bool = False, close: bool = True) -> Path:
@@ -212,7 +242,8 @@ def points(ax, x, y, yerr=None, xerr=None, label=None, series: int = 0, filled: 
 
 
 def trace(ax, x, y, label=None, series: int = 0, **kw):
-    """촘촘하게 샘플링한 측정 곡선 (DAQ 신호, 응력-변형률 곡선 등). 계열마다 선 모양이 다르다."""
+    """곡선. 촘촘하게 샘플링한 측정 곡선 (DAQ 신호, 응력-변형률 곡선 등)이나,
+    이론 곡선만 비교하는 그림의 주 곡선에 쓴다. 계열마다 선 모양이 다르다."""
     style = dict(color=color(series), lw=1.4, ls=DASHES[series], label=label, zorder=2.5)
     style.update(kw)
     (line,) = ax.plot(x, y, **style)
@@ -317,6 +348,66 @@ def region(ax, x0, x1, text=None, alpha: float = 0.14, y: float = 0.97, **text_k
         ax.text((x0 + x1) / 2, y, text, transform=ax.get_xaxis_transform(), **style)
 
 
+def vref(ax, x, text=None, y: float = 0.03, side: str = "left", **kw):
+    """세로 기준선과 이름 (차단 주파수, Nyquist 주파수 등). 이름은 선 옆에 세로로 쓴다.
+
+    y는 글자의 세로 위치 (축 높이에 대한 비율), side는 선의 어느 쪽에 쓸지 ("left", "right").
+    """
+    style = dict(color=GRAY, lw=0.8, ls=REF_DASH, zorder=1)
+    style.update(kw)
+    line = ax.axvline(x, **style)
+    if text:
+        left = side == "left"
+        ax.annotate(text, xy=(x, y), xycoords=ax.get_xaxis_transform(), xytext=(-2 if left else 2, 0),
+                    textcoords="offset points", rotation=90, fontsize=SMALL - 1,
+                    ha="right" if left else "left", va="bottom" if y < 0.5 else "top")
+    return line
+
+
+def href(ax, y, text=None, x: float = 0.02, below: bool = False, **kw):
+    """가로 기준선과 이름 (-3 dB, 허용 한계 등).
+
+    x는 글자의 가로 위치 (축 폭에 대한 비율). below=True면 글자를 선 아래에 쓴다.
+    """
+    style = dict(color=GRAY, lw=0.8, ls=REF_DASH, zorder=1)
+    style.update(kw)
+    line = ax.axhline(y, **style)
+    if text:
+        ax.annotate(text, xy=(x, y), xycoords=ax.get_yaxis_transform(), xytext=(0, -2 if below else 2),
+                    textcoords="offset points", fontsize=SMALL - 1,
+                    ha="left" if x < 0.5 else "right", va="top" if below else "bottom")
+    return line
+
+
+def bars(ax, categories, values, labels=None, yerr=None, fmt: str | None = None, width: float = 0.8,
+         rotation: float = 0):
+    """묶음 막대 그래프. values는 계열별 값 목록 (계열 수 x 범주 수).
+
+    계열은 색과 빗금이 함께 달라진다. fmt를 주면 (예: "{:.3f}") 막대 위에 값을 쓴다.
+    막대가 좁아 값이 서로 겹치면 rotation=90으로 세워 쓴다. 막대 묶음의 중심 x 좌표를 돌려준다.
+    """
+    values = np.atleast_2d(np.asarray(values, float))
+    ns, nc = values.shape
+    x = np.arange(nc)
+    bw = width / ns
+    for i in range(ns):
+        c = color(i)
+        xi = x + (i - (ns - 1) / 2) * bw
+        ax.bar(xi, values[i], bw * 0.9, color=c if not HATCHES[i] else "white", edgecolor=c, linewidth=0.9,
+               hatch=HATCHES[i] or None, label=labels[i] if labels else None, zorder=2)
+        if yerr is not None:
+            ax.errorbar(xi, values[i], yerr=np.atleast_2d(yerr)[i], fmt="none", ecolor=INK, elinewidth=0.8,
+                        capsize=2, capthick=0.8, zorder=3)
+        if fmt:
+            for xx, v in zip(xi, values[i]):
+                ax.annotate(fmt.format(v), (xx, v), xytext=(0, 2), textcoords="offset points",
+                            ha="center", va="bottom", fontsize=SMALL - 1, rotation=rotation)
+    ax.set_xticks(x)
+    ax.set_xticklabels(categories)
+    ax.tick_params(axis="x", length=0)
+    return x
+
+
 def panel(ax, text: str) -> None:
     """패널 제목. "(a) ..." 형식으로 왼쪽 위에 쓴다."""
     ax.set_title(text, loc="left")
@@ -333,7 +424,7 @@ def photos(images, titles=None, width: str | float = "wide", height: float = 2.0
     images는 파일 경로나 PIL 이미지의 목록. crops는 사진마다 (왼, 위, 오른, 아래) 비율 상자나 None.
     패널 폭은 사진의 가로세로비에 맞춘다. 저장할 때는 lf.save(fig, path, dpi=300)이면 충분하다.
     """
-    ims = [load_photo(src, crops[i] if crops else None) for i, src in enumerate(images)]
+    ims = [load_photo(src, crops[i] if crops and crops[i] else None) for i, src in enumerate(images)]
     fig, axes = figure(width, height, ncols=len(ims), squeeze=False,
                        width_ratios=[im.size[0] / im.size[1] for im in ims])
     for i, im in enumerate(ims):

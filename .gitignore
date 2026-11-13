@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+# 수업에서 받은 음원은 올리지 않는다
+figure_Measurement_Prelab/data/noisy_signal.wav
